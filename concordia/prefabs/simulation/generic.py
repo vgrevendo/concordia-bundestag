@@ -326,7 +326,7 @@ class Simulation(simulation_lib.Simulation):
     html_results_log = html_lib.finalise_html(tabbed_html)
     return html_results_log
 
-  def make_checkpoint_data(self) -> dict[str, Any]:
+  def make_checkpoint_data(self, step: int) -> dict[str, Any]:
     """Helper to create a checkpoint data dict."""
 
     checkpoint_data = {
@@ -334,6 +334,8 @@ class Simulation(simulation_lib.Simulation):
         "game_masters": {},
         "raw_log": copy.deepcopy(self._raw_log),
         "checkpoint_counter": self._checkpoint_counter,
+        "step": step,
+        "partial_step_data": {},  # Can get this from the entities directly
     }
 
     # Save entities
