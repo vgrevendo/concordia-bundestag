@@ -1,0 +1,94 @@
+digraph EntityRelationships {
+    rankdir=TB;
+    node [shape=box, style="rounded,filled", fillcolor=lightblue, fontname="Arial"];
+    edge [fontname="Arial", fontsize=10];
+
+    // Core Entity Hierarchy
+    subgraph cluster_entity_hierarchy {
+        label="Entity Hierarchy";
+        style=filled;
+        fillcolor=lightyellow;
+
+        Entity [label="Entity\n(abstract base)\n\n• name()\n• act()\n• observe()", fillcolor=lightcoral];
+        EntityWithLogging [label="EntityWithLogging\n(extends Entity)\n\n• get_last_log()"];
+        EntityWithComponents [label="EntityWithComponents\n(extends Entity)\n\n• get_component()\n• get_phase()\n• get_state()\n• set_state()"];
+        EntityAgent [label="EntityAgent\n(concrete impl)\n\n• Implements EntityWithComponents\n• Manages component lifecycle"];
+        EntityAgentWithLogging [label="EntityAgentWithLogging\n(concrete impl)\n\n• Extends EntityAgent\n• Implements EntityWithLogging\n• Component logging support", fillcolor=lightgreen];
+
+        Entity -> EntityWithLogging [label="extends"];
+        Entity -> EntityWithComponents [label="extends"];
+        EntityWithComponents -> EntityAgent [label="implements"];
+        EntityAgent -> EntityAgentWithLogging [label="extends"];
+        EntityWithLogging -> EntityAgentWithLogging [label="implements", style=dashed];
+    }
+
+    // Prefab Types
+    subgraph cluster_prefabs {
+        label="Prefab Types (Builder/Factory Pattern)";
+        style=filled;
+        fillcolor=lightcyan;
+
+        Prefab [label="Prefab\n(abstract base)\n\n• build()", fillcolor=orange];
+        BasicPrefab [label="basic\n\nThree key questions:\n• What situation?\n• What kind of person?\n• What would I do?"];
+        BasicWithPlanPrefab [label="basic_with_plan\n\nBasic + Planning component"];
+        BasicScriptedPrefab [label="basic_scripted\n\nBasic + Scripted actions"];
+        MinimalPrefab [label="minimal\n\nMinimal components:\n• Instructions\n• Memory\n• Observations"];
+        ConversationalPrefab [label="conversational\n\nSpecialized for\nconversation dynamics"];
+        FakeAssistantPrefab [label="fake_assistant_with_\nconfigurable_system_prompt\n\nSimulates AI assistant"];
+
+        Prefab -> BasicPrefab [label="extends"];
+        Prefab -> BasicWithPlanPrefab [label="extends"];
+        Prefab -> BasicScriptedPrefab [label="extends"];
+        Prefab -> MinimalPrefab [label="extends"];
+        Prefab -> ConversationalPrefab [label="extends"];
+        Prefab -> FakeAssistantPrefab [label="extends"];
+    }
+
+    // Component Types
+    subgraph cluster_components {
+        label="Component Types";
+        style=filled;
+        fillcolor=lavender;
+
+        BaseComponent [label="BaseComponent\n\nBase for all components"];
+        ContextComponent [label="ContextComponent\n\n• pre_act()\n• post_act()\n• pre_observe()\n• post_observe()"];
+        ActingComponent [label="ActingComponent\n\nPrivileged component\nthat decides actions"];
+        ContextProcessorComponent [label="ContextProcessorComponent\n\nProcesses context from\nEntityWithComponents"];
+        ComponentWithLogging [label="ComponentWithLogging\n\nAdds logging channel\nsupport"];
+
+        BaseComponent -> ContextComponent [label="extends"];
+        BaseComponent -> ActingComponent [label="extends"];
+        BaseComponent -> ContextProcessorComponent [label="extends"];
+        BaseComponent -> ComponentWithLogging [label="extends", style=dashed];
+    }
+
+    // Key Relationships
+    BasicPrefab -> EntityAgentWithLogging [label="build() returns", color=red, penwidth=2, style=bold];
+    BasicWithPlanPrefab -> EntityAgentWithLogging [label="build() returns", color=red, penwidth=2, style=bold];
+    BasicScriptedPrefab -> EntityAgentWithLogging [label="build() returns", color=red, penwidth=2, style=bold];
+    MinimalPrefab -> EntityAgentWithLogging [label="build() returns", color=red, penwidth=2, style=bold];
+    ConversationalPrefab -> EntityAgentWithLogging [label="build() returns", color=red, penwidth=2, style=bold];
+    FakeAssistantPrefab -> EntityAgentWithLogging [label="build() returns", color=red, penwidth=2, style=bold];
+
+    EntityAgent -> ContextComponent [label="manages", color=blue, style=dashed];
+    EntityAgent -> ActingComponent [label="manages", color=blue, style=dashed];
+    EntityAgent -> ContextProcessorComponent [label="manages", color=blue, style=dashed];
+
+    // Legend
+    subgraph cluster_legend {
+        label="Legend";
+        style=filled;
+        fillcolor=white;
+
+        node [shape=plaintext, fillcolor=white];
+        legend [label=<
+            <table border="0" cellborder="1" cellspacing="0">
+                <tr><td><b>Line Style</b></td><td><b>Meaning</b></td></tr>
+                <tr><td>Solid</td><td>Inheritance/Implementation</td></tr>
+                <tr><td>Dashed</td><td>Association/Uses</td></tr>
+                <tr><td><font color="red">Red Bold</font></td><td>Factory Pattern (build)</td></tr>
+                <tr><td><font color="blue">Blue Dashed</font></td><td>Manages/Contains</td></tr>
+            </table>
+        >];
+    }
+}
