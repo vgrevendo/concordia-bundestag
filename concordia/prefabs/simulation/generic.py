@@ -30,6 +30,7 @@ from concordia.typing import entity as entity_lib
 from concordia.typing import entity_component
 from concordia.typing import prefab as prefab_lib
 from concordia.typing import simulation as simulation_lib
+from concordia.typing import steps as steps_lib
 from concordia.utils import helper_functions as helper_functions_lib
 from concordia.utils import html as html_lib
 import numpy as np
@@ -70,6 +71,7 @@ class Simulation(simulation_lib.Simulation):
     self._model = model
     self._embedder = embedder
     self._engine = engine
+    self._steps = steps_lib.StepsCounter(0)
     self.game_masters = []
     self.entities = []
     self._raw_log = []
@@ -273,6 +275,7 @@ class Simulation(simulation_lib.Simulation):
         entities=self.entities,
         premise=premise,
         max_steps=max_steps,
+        steps=self._steps,
         verbose=True,
         log=raw_log,
         checkpoint_callback=checkpoint_callback,
@@ -335,6 +338,7 @@ class Simulation(simulation_lib.Simulation):
         "raw_log": copy.deepcopy(self._raw_log),
         "checkpoint_counter": self._checkpoint_counter,
         "step": step,
+        "steps": int(self._steps),
         "partial_step_data": {},  # Can get this from the entities directly
     }
 
@@ -377,7 +381,7 @@ class Simulation(simulation_lib.Simulation):
 
   def save_checkpoint(self, step: int, checkpoint_path: str):
     """Saves the state of all entities at the current step."""
-    checkpoint_data = self.make_checkpoint_data()
+    checkpoint_data = self.make_checkpoint_data(step)
 
     if self._get_state_callback:
       self._get_state_callback(checkpoint_data)
@@ -401,6 +405,10 @@ class Simulation(simulation_lib.Simulation):
       checkpoint: dict[str, Any],
   ):
     """Loads entity and game master states from a checkpoint dict."""
+
+    # Load steps
+    steps = checkpoint.get("steps", 0)
+    self._steps = steps_lib.StepsCounter(steps)
 
     # Load entities
     entity_states = checkpoint.get("entities", {})

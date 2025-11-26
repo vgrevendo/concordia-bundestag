@@ -26,6 +26,7 @@ from concordia.components.game_master import next_game_master as next_game_maste
 from concordia.components.game_master import switch_act as switch_act_component
 from concordia.environment import engine as engine_lib
 from concordia.typing import entity as entity_lib
+from concordia.typing import steps as steps_lib
 from concordia.utils import concurrency
 import termcolor
 
@@ -208,6 +209,7 @@ class Sequential(engine_lib.Engine):
       entities: Sequence[entity_lib.Entity | entity_lib.EntityWithLogging],
       premise: str = '',
       max_steps: int = 100,
+      steps: steps_lib.StepsCounter = steps_lib.StepsCounter(0),
       verbose: bool = False,
       log: list[Mapping[str, Any]] | None = None,
       checkpoint_callback: Callable[[int], None] | None = None,
@@ -217,7 +219,6 @@ class Sequential(engine_lib.Engine):
       raise ValueError('No game masters provided.')
 
     log_entry = _get_empty_log_entry()
-    steps = 0
     game_master = game_masters[0]
     if premise:
       premise = f'{EVENT_TAG} {premise}'
