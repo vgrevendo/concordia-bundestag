@@ -47,6 +47,149 @@ PUTATIVE_EVENT_TAG = event_resolution_components.PUTATIVE_EVENT_TAG
 EVENT_TAG = event_resolution_components.EVENT_TAG
 
 _PRINT_COLOR = 'cyan'
+USER_INPUT_TAG = '[user_input]'
+
+
+def _any_entity_requires_user_input(
+    entities: Sequence[entity_lib.Entity],
+) -> bool:
+  """Check if any entity requires user input.
+
+  Args:
+    entities: The list of entities to check.
+
+  Returns:
+    True if at least one entity requires user input.
+  """
+  from concordia.components.agent import user_input_request
+  from concordia.typing import entity_component
+
+  for entity in entities:
+    if not isinstance(entity, entity_component.EntityWithComponents):
+      continue
+    try:
+      user_input_comp = entity.get_component(
+          user_input_request.DEFAULT_USER_INPUT_COMPONENT_KEY,
+          type_=user_input_request.UserInputRequest,
+      )
+      if user_input_comp.requires_user_input():
+        return True
+    except KeyError:
+      # Entity doesn't have a user input component
+      pass
+  return False
+
+
+def _is_resuming_from_user_input(
+    entities: Sequence[entity_lib.Entity],
+) -> bool:
+  """Check if we're resuming from a user input pause.
+
+  This function checks if any entity was waiting for user input and has now
+  received it. It also validates that user input was actually provided by
+  checking for the [user_input] tag in the entity's memory.
+
+  Args:
+    entities: The list of entities to check.
+
+  Returns:
+    True if resuming from a user input pause.
+
+  Raises:
+    RuntimeError: If an entity is marked as having received input but no
+                  [user_input] observation is found in its memory.
+  """
+  from concordia.components.agent import user_input_request
+  from concordia.typing import entity_component
+
+  for entity in entities:
+    if not isinstance(entity, entity_component.EntityWithComponents):
+      continue
+    try:
+      user_input_comp = entity.get_component(
+          user_input_request.DEFAULT_USER_INPUT_COMPONENT_KEY,
+          type_=user_input_request.UserInputRequest,
+      )
+      if user_input_comp.was_input_just_received():
+        # Validate that user input was actually provided
+        try:
+          memory_comp = entity.get_component('__memory__')
+          all_memories = memory_comp.get_all_memories_as_text()
+          # Check if any memory contains the user input tag
+          has_user_input = any(
+              USER_INPUT_TAG in str(memory) for memory in all_memories
+          )
+          if not has_user_input:
+            raise RuntimeError(
+                f"Entity '{entity.name}' is marked as having received user "
+                f"input, but no {USER_INPUT_TAG} observation found in memory. "
+                f"You must call provide_user_input() before resuming."
+            )
+        except KeyError:
+          # Entity doesn't have memory component, skip validation
+          pass
+        return True
+    except KeyError:
+      # Entity doesn't have a user input component
+      pass
+  return False
+
+
+def _get_entity_with_pending_action(
+    entities: Sequence[entity_lib.Entity],
+) -> tuple[entity_lib.Entity, str] | None:
+  """Get the entity that has a pending action to resolve.
+
+  Args:
+    entities: The list of entities to check.
+
+  Returns:
+    A tuple of (entity, pending_action) if found, None otherwise.
+  """
+  from concordia.components.agent import user_input_request
+  from concordia.typing import entity_component
+
+  for entity in entities:
+    if not isinstance(entity, entity_component.EntityWithComponents):
+      continue
+    try:
+      user_input_comp = entity.get_component(
+          user_input_request.DEFAULT_USER_INPUT_COMPONENT_KEY,
+          type_=user_input_request.UserInputRequest,
+      )
+      if user_input_comp.was_input_just_received():
+        pending_action = user_input_comp.get_pending_action()
+        if pending_action:
+          return (entity, pending_action)
+    except KeyError:
+      # Entity doesn't have a user input component
+      pass
+  return None
+
+
+def _clear_all_user_input_requests(
+    entities: Sequence[entity_lib.Entity],
+) -> None:
+  """Clear user input request state from all entities.
+
+  Args:
+    entities: The list of entities to clear requests from.
+  """
+  from concordia.components.agent import user_input_request
+  from concordia.typing import entity_component
+
+  for entity in entities:
+    if not isinstance(entity, entity_component.EntityWithComponents):
+      continue
+    try:
+      user_input_comp = entity.get_component(
+          user_input_request.DEFAULT_USER_INPUT_COMPONENT_KEY,
+          type_=user_input_request.UserInputRequest,
+      )
+      user_input_comp.clear_request()
+    except KeyError:
+      # Entity doesn't have a user input component
+      pass
 
 
 def _get_empty_log_entry():
@@ -233,63 +376,94 @@ class Sequential(engine_lib.Engine):
         assert hasattr(game_master, 'get_last_log')  # Assertion for pytype
         log_entry['next_game_master'] = game_master.get_last_log()
 
-      # Define a function to make an entity's observation and send it to them.
-      def _entity_observation(entity: entity_lib.Entity) -> None:
-        observation = self.make_observation(game_master, entity)
-        if log is not None and hasattr(game_master, 'get_last_log'):
-          assert hasattr(game_master, 'get_last_log')  # Assertion for pytype
-          log_entry['make_observation'][entity.name] = (
-              game_master.get_last_log())
-        # Only observe if the observation is not an empty or whitespace string
-        if observation and observation.strip():
-          if verbose:
-            print(
-                termcolor.colored(
-                    f'Entity {entity.name} observed: {observation}',
-                    _PRINT_COLOR,
-                )
-            )
-          entity.observe(observation)
-
-      tasks = {
-          entity.name: functools.partial(_entity_observation, entity)
-          for entity in entities
-      }
-      concurrency.run_tasks(tasks)
-
-      next_entity, entity_spec_to_use = self.next_acting(
-          game_master, entities, log_entry=log_entry, log=log)
-
-      if entity_spec_to_use.output_type == entity_lib.OutputType.SKIP_THIS_STEP:
-        # It is often useful to have a game master that does not allow players
-        # to take actions. For example, the game master may
-        # initialize other players and game masters. In this case, we skip the
-        # current step and continue to the next step.
+      # Check if we're resuming from a user input pause
+      if _is_resuming_from_user_input(entities):
+        # Get the entity with pending action
+        result = _get_entity_with_pending_action(entities)
+        if result is None:
+          raise RuntimeError(
+              'Resuming from user input but no entity with pending action found'
+          )
+        next_entity, action = result
         if verbose:
           print(termcolor.colored(
-              '\nSkipping the action phase for the current time step.\n'))
-        if checkpoint_callback is not None:
-          print(f'Calling checkpoint callback at step {steps}')
-          checkpoint_callback(steps)
-        steps += 1
-        continue
-
-      if verbose:
-        print(termcolor.colored(
-            f'Entity {next_entity.name} is next to act. They must respond '
-            f' in the format: "{entity_spec_to_use}".', _PRINT_COLOR))
-      raw_action = next_entity.act(entity_spec_to_use)
-      if next_entity.name in raw_action:
-        action = raw_action
+              f'Resuming from user input for entity {next_entity.name}',
+              _PRINT_COLOR))
+          print(termcolor.colored(
+              f'Resolving pending action: {action}', _PRINT_COLOR))
+        # Skip observation, next_acting, and act phases - go directly to resolve
       else:
-        action = f'{next_entity.name}: {raw_action}'
-      if verbose:
-        print(termcolor.colored(
-            f'Entity {next_entity.name} chose action: {action}', _PRINT_COLOR))
+        # Normal flow: observation, next_acting, act phases
+        # Define a function to make an entity's observation and send it to them.
+        def _entity_observation(entity: entity_lib.Entity) -> None:
+          observation = self.make_observation(game_master, entity)
+          if log is not None and hasattr(game_master, 'get_last_log'):
+            assert hasattr(game_master, 'get_last_log')  # Assertion for pytype
+            log_entry['make_observation'][entity.name] = (
+                game_master.get_last_log())
+          # Only observe if the observation is not an empty or whitespace string
+          if observation and observation.strip():
+            if verbose:
+              print(
+                  termcolor.colored(
+                      f'Entity {entity.name} observed: {observation}',
+                      _PRINT_COLOR,
+                  )
+              )
+            entity.observe(observation)
 
+        tasks = {
+            entity.name: functools.partial(_entity_observation, entity)
+            for entity in entities
+        }
+        concurrency.run_tasks(tasks)
+
+        next_entity, entity_spec_to_use = self.next_acting(
+            game_master, entities, log_entry=log_entry, log=log)
+
+        if entity_spec_to_use.output_type == entity_lib.OutputType.SKIP_THIS_STEP:
+          # It is often useful to have a game master that does not allow players
+          # to take actions. For example, the game master may
+          # initialize other players and game masters. In this case, we skip the
+          # current step and continue to the next step.
+          if verbose:
+            print(termcolor.colored(
+                '\nSkipping the action phase for the current time step.\n'))
+          if checkpoint_callback is not None:
+            print(f'Calling checkpoint callback at step {steps}')
+            checkpoint_callback(steps)
+          steps += 1
+          continue
+
+        if verbose:
+          print(termcolor.colored(
+              f'Entity {next_entity.name} is next to act. They must respond '
+              f' in the format: "{entity_spec_to_use}".', _PRINT_COLOR))
+        raw_action = next_entity.act(entity_spec_to_use)
+        if next_entity.name in raw_action:
+          action = raw_action
+        else:
+          action = f'{next_entity.name}: {raw_action}'
+        if verbose:
+          print(termcolor.colored(
+              f'Entity {next_entity.name} chose action: {action}', _PRINT_COLOR))
+
+        # Check if any entity requires user input after acting
+        if _any_entity_requires_user_input(entities):
+          if verbose:
+            print(termcolor.colored(
+                'User input required. Exiting simulation run loop.',
+                _PRINT_COLOR))
+          # Exit the loop without resolving - caller should provide input
+          return
+
+      # Resolve the action (either from normal flow or resumed from user input)
       self.resolve(game_master=game_master,
                    putative_event=action,
                    verbose=verbose)
+
+      # Clear user input requests after resolving
+      _clear_all_user_input_requests(entities)
 
       steps += 1
       if log is not None and hasattr(game_master, 'get_last_log'):

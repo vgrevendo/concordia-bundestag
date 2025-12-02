@@ -492,3 +492,75 @@ class Simulation(simulation_lib.Simulation):
       else:
         print(f"Adding new game master {entity_name} from checkpoint.")
         self.add_game_master(instance_config, state=entity_components_state)
+
+  def get_entities_requiring_user_input(self) -> list[str]:
+    """Returns a list of entity names that require user input.
+
+    Returns:
+      A list of entity names that have requested user input and are waiting
+      for it to be provided.
+    """
+    from concordia.components.agent import user_input_request
+
+    entities_needing_input = []
+    for entity in self.entities:
+      if not isinstance(entity, entity_component.EntityWithComponents):
+        continue
+      try:
+        user_input_comp = entity.get_component(
+            user_input_request.DEFAULT_USER_INPUT_COMPONENT_KEY,
+            type_=user_input_request.UserInputRequest,
+        )
+        if user_input_comp.requires_user_input():
+          entities_needing_input.append(entity.name)
+      except KeyError:
+        # Entity doesn't have a user input component
+        pass
+    return entities_needing_input
+
+  def provide_user_input(self, entity_name: str, user_action: str) -> None:
+    """Provide user input to an entity that requested it.
+
+    This method sends the user's input to the specified entity as an
+    observation and marks the input as received in the entity's
+    UserInputRequest component.
+
+    Args:
+      entity_name: The name of the entity to provide input to.
+      user_action: The user's input/action as a string.
+
+    Raises:
+      ValueError: If the entity is not found, doesn't support components,
+                  or doesn't have a UserInputRequest component.
+    """
+    from concordia.components.agent import user_input_request
+
+    # Find the entity
+    entity = next((e for e in self.entities if e.name == entity_name), None)
+    if not entity:
+      raise ValueError(f"Entity '{entity_name}' not found")
+
+    # Check if entity supports components
+    if not isinstance(entity, entity_component.EntityWithComponents):
+      raise ValueError(
+          f"Entity '{entity_name}' doesn't support components"
+      )
+
+    # Get the user input component
+    try:
+      user_input_comp = entity.get_component(
+          user_input_request.DEFAULT_USER_INPUT_COMPONENT_KEY,
+          type_=user_input_request.UserInputRequest,
+      )
+    except KeyError:
+      raise ValueError(
+          f"Entity '{entity_name}' doesn't have a user input component"
+      )
+
+    # Send the input as an observation
+    USER_INPUT_TAG = '[user_input]'
+    observation = f'{USER_INPUT_TAG} {user_action}'
+    entity.observe(observation)
+
+    # Mark input as received
+    user_input_comp.mark_input_received()
